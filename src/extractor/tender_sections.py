@@ -90,7 +90,7 @@ def extract_blocks(text: str, html: str | None = None) -> list[dict[str, object]
         order += 1
         content = str(section.get("section_content") or "").strip()
         if content:
-            table_json = _match_html_table(content, html_tables)
+            table_json = _match_html_tables(content, html_tables)
             block_type = "table_like_text" if table_json else "paragraph"
             text_content = _remove_flat_table_lines(content) if table_json else content
             blocks.append(
@@ -152,12 +152,21 @@ def _is_major_title(title: str) -> bool:
     return any(keyword in title for keyword in MAJOR_TITLE_KEYWORDS)
 
 
-def _match_html_table(content: str, tables: list[dict[str, object]]) -> dict[str, object] | None:
-    for index, table in enumerate(tables):
+def _match_html_tables(content: str, tables: list[dict[str, object]]) -> dict[str, object] | None:
+    matched: list[dict[str, object]] = []
+    index = 0
+    while index < len(tables):
+        table = tables[index]
         table_text = _table_plain_text(table)
         if _table_belongs_to_section(content, table_text):
-            return tables.pop(index)
-    return None
+            matched.append(tables.pop(index))
+            continue
+        index += 1
+    if not matched:
+        return None
+    if len(matched) == 1:
+        return matched[0]
+    return {"format": "html_tables", "tables": matched}
 
 
 def _table_belongs_to_section(content: str, table_text: str) -> bool:
@@ -172,15 +181,27 @@ def _table_belongs_to_section(content: str, table_text: str) -> bool:
 
 def _table_plain_text(table: dict[str, object]) -> str:
     parts: list[str] = []
-    headers = table.get("headers")
-    rows = table.get("rows")
-    if isinstance(headers, list):
-        parts.extend(str(item) for item in headers)
-    if isinstance(rows, list):
-        for row in rows:
-            if isinstance(row, list):
-                parts.extend(str(item) for item in row)
+    rows = _table_all_rows(table)
+    for row in rows:
+        parts.extend(_cell_text(cell) for cell in row)
     return "\n".join(parts)
+
+
+def _table_all_rows(table: dict[str, object]) -> list[list[object]]:
+    rows: list[list[object]] = []
+    headers = table.get("headers")
+    body_rows = table.get("rows")
+    if isinstance(headers, list):
+        rows.append(headers)
+    if isinstance(body_rows, list):
+        rows.extend(row for row in body_rows if isinstance(row, list))
+    return rows
+
+
+def _cell_text(cell: object) -> str:
+    if isinstance(cell, dict):
+        return str(cell.get("text") or "")
+    return str(cell)
 
 
 def _compact_text(text: str) -> str:
@@ -202,7 +223,7 @@ def _extract_html_tables(html: str) -> list[dict[str, object]]:
     parser.feed(html)
     tables: list[dict[str, object]] = []
     for rows in parser.tables:
-        clean_rows = [[cell for cell in row if cell] for row in rows]
+        clean_rows = [[cell for cell in row if cell.get("text")] for row in rows]
         clean_rows = [row for row in clean_rows if row]
         if len(clean_rows) < 2:
             continue
@@ -211,6 +232,7 @@ def _extract_html_tables(html: str) -> list[dict[str, object]]:
                 "format": "html_table",
                 "headers": clean_rows[0],
                 "rows": clean_rows[1:],
+                "row_count": len(clean_rows),
             }
         )
     return tables
@@ -219,11 +241,12 @@ def _extract_html_tables(html: str) -> list[dict[str, object]]:
 class _TableParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.tables: list[list[list[str]]] = []
+        self.tables: list[list[list[dict[str, object]]]] = []
         self._table_depth = 0
-        self._current_rows: list[list[str]] | None = None
-        self._current_row: list[str] | None = None
+        self._current_rows: list[list[dict[str, object]]] | None = None
+        self._current_row: list[dict[str, object]] | None = None
         self._current_cell: list[str] | None = None
+        self._current_cell_meta: dict[str, object] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag = tag.lower()
@@ -235,6 +258,12 @@ class _TableParser(HTMLParser):
             self._current_row = []
         elif self._table_depth and tag in {"td", "th"}:
             self._current_cell = []
+            attrs_dict = {key.lower(): value for key, value in attrs}
+            self._current_cell_meta = {
+                "header": tag == "th",
+                "colspan": _positive_int(attrs_dict.get("colspan"), 1),
+                "rowspan": _positive_int(attrs_dict.get("rowspan"), 1),
+            }
         elif self._table_depth and tag == "br" and self._current_cell is not None:
             self._current_cell.append("\n")
 
@@ -242,8 +271,12 @@ class _TableParser(HTMLParser):
         tag = tag.lower()
         if tag in {"td", "th"} and self._current_cell is not None and self._current_row is not None:
             text = _normalize_cell_text("".join(self._current_cell))
-            self._current_row.append(text)
+            cell = {"text": text}
+            if self._current_cell_meta:
+                cell.update(self._current_cell_meta)
+            self._current_row.append(cell)
             self._current_cell = None
+            self._current_cell_meta = None
         elif tag == "tr" and self._current_row is not None and self._current_rows is not None:
             if any(cell for cell in self._current_row):
                 self._current_rows.append(self._current_row)
@@ -263,3 +296,11 @@ def _normalize_cell_text(text: str) -> str:
     text = re.sub(r"[ \t\r\f\v\u00a0\u3000]+", " ", text)
     text = re.sub(r"\n+", "\n", text)
     return text.strip()
+
+
+def _positive_int(value: str | None, default: int) -> int:
+    try:
+        parsed = int(value or default)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default

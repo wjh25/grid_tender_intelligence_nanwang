@@ -56,35 +56,45 @@ function search() {
   loadTenders()
 }
 
-function tableHeaders(block: DocumentBlock) {
+function tableGroups(block: DocumentBlock) {
   const value = block.table_json as any
-  if (Array.isArray(value?.headers)) return value.headers
+  if (value?.format === 'html_tables' && Array.isArray(value?.tables)) return value.tables
+  if (value?.format === 'html_table') return [value]
   return []
 }
 
-function tableRows(block: DocumentBlock) {
-  const value = block.table_json as any
-  if (Array.isArray(value?.rows)) return value.rows
-  if (Array.isArray(value?.data)) return value.data
-  if (Array.isArray(value) && Array.isArray(value[0])) return value
+function tableHeaders(table: any) {
+  if (Array.isArray(table?.headers)) return table.headers
+  return []
+}
+
+function tableRows(table: any) {
+  if (Array.isArray(table?.rows)) return table.rows
+  if (Array.isArray(table?.data)) return table.data
+  if (Array.isArray(table) && Array.isArray(table[0])) return table
   return []
 }
 
 function tableLines(block: DocumentBlock) {
   const value = block.table_json as any
-  if (value?.format !== 'html_table' && Array.isArray(value?.lines)) return value.lines
+  if (!['html_table', 'html_tables'].includes(value?.format) && Array.isArray(value?.lines)) return value.lines
   return []
 }
 
 function hasStructuredTable(block: DocumentBlock) {
-  const value = block.table_json as any
-  return value?.format === 'html_table' && tableRows(block).length > 0
+  return tableGroups(block).some((table: any) => tableRows(table).length > 0)
 }
 
 function cellText(value: unknown) {
   if (value === null || value === undefined) return ''
-  if (typeof value === 'object') return JSON.stringify(value)
+  if (typeof value === 'object') return String((value as any).text || '')
   return String(value)
+}
+
+function cellSpan(value: unknown, key: 'colspan' | 'rowspan') {
+  if (!value || typeof value !== 'object') return 1
+  const parsed = Number((value as any)[key] || 1)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1
 }
 
 function textLines(block: DocumentBlock) {
@@ -128,19 +138,28 @@ function renderLines(block: DocumentBlock) {
 }
 
 function splitInlineSubheading(line: string) {
-  const match = line.match(/^(\d+\.\d+\s*[^：:]{1,36}[：:])\s*(.+)$/)
-  if (match) {
-    return [
-      { text: match[1], type: 'subheading' },
-      { text: match[2], type: 'paragraph' }
-    ]
-  }
-  return [
-    {
-      text: line,
-      type: /^(\d+\.\d+|[一二三四五六七八九十]+[、．.])/.test(line) ? 'subheading' : 'paragraph'
+  // 识别数字或中文开头的各种序号模式：1.1 / (1) / （1） / 1) / 一、 / (一) / （一）
+  const prefixRegex = /^(\d+(?:\.\d+)+|\(\d+\)|（\d+）|\d+\)|[一二三四五六七八九十]+[、．.]|\([一二三四五六七八九十]+\)|（[一二三四五六七八九十]+）)/;
+  
+  if (prefixRegex.test(line)) {
+    // 强制在序号后加上空格，解决“标题后面缩进空格”问题
+    let formattedLine = line.replace(prefixRegex, (match) => match.trim() + ' ').replace(/  +/g, ' ');
+    
+    // 如果此行包含冒号，且冒号前内容适中（如 "1.1 采购范围：包括XXX"），拆分为独立的小标题和正文段落
+    const colonMatch = formattedLine.match(/^([^：:]{2,40}[：:])\s*(.+)$/);
+    if (colonMatch) {
+      return [
+        { text: colonMatch[1], type: 'subheading' },
+        { text: colonMatch[2], type: 'paragraph' }
+      ];
     }
-  ]
+    
+    // 如果没有冒号或太长，则整行作为二级标题渲染
+    return [{ text: formattedLine, type: 'subheading' }];
+  }
+  
+  // 普通正文行
+  return [{ text: line, type: 'paragraph' }];
 }
 
 onMounted(() => {
@@ -281,14 +300,16 @@ onMounted(() => {
             <section v-for="block in current.blocks" :key="block.id" class="doc-block">
               <h4 v-if="block.block_type === 'heading' && block.title" class="block-title">
                 <span v-if="block.section_no" class="section-no">{{ block.section_no }}</span>
-                {{ block.title }}
+                <span class="title-text">{{ block.title }}</span>
               </h4>
+              
               <div v-if="renderLines(block).length" class="block-text">
                 <template v-for="(line, lineIndex) in renderLines(block)" :key="lineIndex">
                   <div v-if="line.type === 'subheading'" class="inline-subheading">{{ line.text }}</div>
                   <p v-else>{{ line.text }}</p>
                 </template>
               </div>
+              
               <div v-if="signatureLines(block).length" class="signature-block">
                 <div
                   v-for="(line, lineIndex) in signatureLines(block)"
@@ -299,21 +320,35 @@ onMounted(() => {
                 </div>
               </div>
               
-              <div v-if="hasStructuredTable(block)" class="table-scroll">
-                <table class="plain-table">
-                  <thead v-if="tableHeaders(block).length">
-                    <tr>
-                      <th v-for="(header, headerIndex) in tableHeaders(block)" :key="headerIndex">
-                        {{ cellText(header) }}
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="(row, rowIndex) in tableRows(block)" :key="rowIndex">
-                      <td v-for="(cell, cellIndex) in row" :key="cellIndex">{{ cellText(cell) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div v-if="hasStructuredTable(block)" class="table-stack">
+                <div v-for="(table, tableIndex) in tableGroups(block)" :key="tableIndex" class="table-scroll">
+                  <table class="plain-table">
+                    <thead v-if="tableHeaders(table).length">
+                      <tr>
+                        <th
+                          v-for="(header, headerIndex) in tableHeaders(table)"
+                          :key="headerIndex"
+                          :colspan="cellSpan(header, 'colspan')"
+                          :rowspan="cellSpan(header, 'rowspan')"
+                        >
+                          {{ cellText(header) }}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(row, rowIndex) in tableRows(table)" :key="rowIndex">
+                        <td
+                          v-for="(cell, cellIndex) in row"
+                          :key="cellIndex"
+                          :colspan="cellSpan(cell, 'colspan')"
+                          :rowspan="cellSpan(cell, 'rowspan')"
+                        >
+                          {{ cellText(cell) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
               
               <div v-else-if="tableLines(block).length" class="line-table">
