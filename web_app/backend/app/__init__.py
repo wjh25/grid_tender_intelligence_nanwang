@@ -1,0 +1,2 @@
+"""Grid tender web backend."""
+

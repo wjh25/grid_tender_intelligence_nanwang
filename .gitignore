@@ -1,0 +1,14 @@
+.DS_Store
+__pycache__/
+*.pyc
+.env
+.venv/
+node_modules/
+dist/
+data/raw_html/
+data/output/
+data/*.xlsx
+web_app/backend/.venv/
+web_app/frontend/node_modules/
+web_app/frontend/dist/
+web_app/.pycache/
