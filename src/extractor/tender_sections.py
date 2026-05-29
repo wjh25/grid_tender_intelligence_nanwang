@@ -10,6 +10,8 @@ SECTION_RE = re.compile(
     r"(?m)^\s*(?P<section_no>(?:\d+|[一二三四五六七八九十]+)[.、．])\s*(?P<section_title>[^\n]{2,40})\s*$"
 )
 
+SUBSECTION_RE = re.compile(r"^\s*\d+[.、．]\s*\d+")
+
 MAJOR_TITLE_KEYWORDS = [
     "招标条件",
     "项目概况",
@@ -88,8 +90,8 @@ def extract_blocks(text: str, html: str | None = None) -> list[dict[str, object]
         order += 1
         content = str(section.get("section_content") or "").strip()
         if content:
-            block_type = "table_like_text" if _looks_like_table(content) else "paragraph"
-            table_json = _next_html_table(html_tables) if block_type == "table_like_text" else None
+            table_json = _match_html_table(content, html_tables)
+            block_type = "table_like_text" if table_json else "paragraph"
             text_content = _remove_flat_table_lines(content) if table_json else content
             blocks.append(
                 {
@@ -99,7 +101,7 @@ def extract_blocks(text: str, html: str | None = None) -> list[dict[str, object]
                     "section_no": section.get("section_no"),
                     "title": section.get("section_title"),
                     "text_content": text_content,
-                    "table_json": table_json or (_table_like_json(content) if block_type == "table_like_text" else None),
+                    "table_json": table_json,
                     "block_json": {
                         "type": block_type,
                         "section_title": section.get("section_title"),
@@ -145,23 +147,44 @@ def extract_requirements(blocks: list[dict[str, object]]) -> list[dict[str, obje
 
 
 def _is_major_title(title: str) -> bool:
+    if SUBSECTION_RE.match(title) or re.match(r"^\s*\d+", title):
+        return False
     return any(keyword in title for keyword in MAJOR_TITLE_KEYWORDS)
 
 
-def _looks_like_table(text: str) -> bool:
-    table_words = ["序号", "标的名称", "标包", "投标人", "中标候选人", "报价", "金额", "通用资格要求", "专用资格要求", "内容"]
-    return sum(1 for word in table_words if word in text) >= 2
+def _match_html_table(content: str, tables: list[dict[str, object]]) -> dict[str, object] | None:
+    for index, table in enumerate(tables):
+        table_text = _table_plain_text(table)
+        if _table_belongs_to_section(content, table_text):
+            return tables.pop(index)
+    return None
 
 
-def _table_like_json(text: str) -> dict[str, object]:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return {"format": "line_table_candidate", "lines": lines}
+def _table_belongs_to_section(content: str, table_text: str) -> bool:
+    if not table_text:
+        return False
+    normalized_content = _compact_text(content)
+    normalized_table = _compact_text(table_text)
+    if not normalized_table:
+        return False
+    return normalized_table[: min(len(normalized_table), 30)] in normalized_content
 
 
-def _next_html_table(tables: list[dict[str, object]]) -> dict[str, object] | None:
-    if not tables:
-        return None
-    return tables.pop(0)
+def _table_plain_text(table: dict[str, object]) -> str:
+    parts: list[str] = []
+    headers = table.get("headers")
+    rows = table.get("rows")
+    if isinstance(headers, list):
+        parts.extend(str(item) for item in headers)
+    if isinstance(rows, list):
+        for row in rows:
+            if isinstance(row, list):
+                parts.extend(str(item) for item in row)
+    return "\n".join(parts)
+
+
+def _compact_text(text: str) -> str:
+    return re.sub(r"\s+", "", text)
 
 
 def _remove_flat_table_lines(text: str) -> str:

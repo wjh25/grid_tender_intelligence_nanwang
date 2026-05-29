@@ -257,8 +257,19 @@ body {
   line-height: 1.8;
   color: #3f4a56;
   margin: 0;
-  white-space: pre-wrap;
   text-align: justify;
+}
+
+.block-text p {
+  margin: 0 0 8px;
+}
+
+.inline-subheading {
+  color: #2c3e50;
+  font-size: 15px;
+  font-weight: 600;
+  margin: 12px 0 6px;
+  text-align: left;
 }
 
 .signature-block {

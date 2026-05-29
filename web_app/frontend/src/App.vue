@@ -72,12 +72,13 @@ function tableRows(block: DocumentBlock) {
 
 function tableLines(block: DocumentBlock) {
   const value = block.table_json as any
-  if (Array.isArray(value?.lines)) return value.lines
+  if (value?.format !== 'html_table' && Array.isArray(value?.lines)) return value.lines
   return []
 }
 
 function hasStructuredTable(block: DocumentBlock) {
-  return tableRows(block).length > 0
+  const value = block.table_json as any
+  return value?.format === 'html_table' && tableRows(block).length > 0
 }
 
 function cellText(value: unknown) {
@@ -116,6 +117,17 @@ function signatureLineClass(line: string) {
   if (/^20\d{2}年\d{1,2}月\d{1,2}日$/.test(line)) return 'signature-line signature-date'
   if (/^[\u4e00-\u9fa5]{2,5}$/.test(line)) return 'signature-line signature-name'
   return 'signature-line'
+}
+
+function renderLines(block: DocumentBlock) {
+  return normalText(block)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => ({
+      text: line,
+      type: /^(\d+\.\d+|[一二三四五六七八九十]+[、．.])/.test(line) ? 'subheading' : 'paragraph'
+    }))
 }
 
 onMounted(() => {
@@ -258,7 +270,12 @@ onMounted(() => {
                 <span v-if="block.section_no" class="section-no">{{ block.section_no }}</span>
                 {{ block.title }}
               </h4>
-              <p v-if="normalText(block)" class="block-text">{{ normalText(block) }}</p>
+              <div v-if="renderLines(block).length" class="block-text">
+                <template v-for="(line, lineIndex) in renderLines(block)" :key="lineIndex">
+                  <div v-if="line.type === 'subheading'" class="inline-subheading">{{ line.text }}</div>
+                  <p v-else>{{ line.text }}</p>
+                </template>
+              </div>
               <div v-if="signatureLines(block).length" class="signature-block">
                 <div
                   v-for="(line, lineIndex) in signatureLines(block)"
