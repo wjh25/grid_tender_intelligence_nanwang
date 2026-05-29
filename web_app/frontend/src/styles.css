@@ -261,6 +261,29 @@ body {
   text-align: justify;
 }
 
+.signature-block {
+  margin-top: 18px;
+  text-align: right;
+}
+
+.signature-line {
+  color: #1f2933;
+  font-size: 15px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+}
+
+.signature-name {
+  font-family: "Kaiti SC", "STKaiti", "KaiTi", serif;
+  font-size: 28px;
+  line-height: 1.4;
+}
+
+.signature-date {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 /* Extracted Tables Styling */
 .table-scroll {
   margin-top: 16px;

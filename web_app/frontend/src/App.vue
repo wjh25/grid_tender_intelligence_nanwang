@@ -86,6 +86,38 @@ function cellText(value: unknown) {
   return String(value)
 }
 
+function textLines(block: DocumentBlock) {
+  return (block.text_content || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+function signatureStart(lines: string[]) {
+  return lines.findIndex((line) =>
+    line.includes('招标人（或招标代理机构）主要负责人') ||
+    line.includes('招标人或其招标代理机构名称（盖章）')
+  )
+}
+
+function normalText(block: DocumentBlock) {
+  const lines = textLines(block)
+  const index = signatureStart(lines)
+  return (index >= 0 ? lines.slice(0, index) : lines).join('\n')
+}
+
+function signatureLines(block: DocumentBlock) {
+  const lines = textLines(block)
+  const index = signatureStart(lines)
+  return index >= 0 ? lines.slice(index) : []
+}
+
+function signatureLineClass(line: string) {
+  if (/^20\d{2}年\d{1,2}月\d{1,2}日$/.test(line)) return 'signature-line signature-date'
+  if (/^[\u4e00-\u9fa5]{2,5}$/.test(line)) return 'signature-line signature-name'
+  return 'signature-line'
+}
+
 onMounted(() => {
   view.value = 'home'
 })
@@ -222,11 +254,20 @@ onMounted(() => {
           <div class="blocks">
             <el-empty v-if="!current.blocks.length" description="未提取到正文块" />
             <section v-for="block in current.blocks" :key="block.id" class="doc-block">
-              <h4 v-if="block.title" class="block-title">
+              <h4 v-if="block.block_type === 'heading' && block.title" class="block-title">
                 <span v-if="block.section_no" class="section-no">{{ block.section_no }}</span>
                 {{ block.title }}
               </h4>
-              <p v-if="block.text_content" class="block-text">{{ block.text_content }}</p>
+              <p v-if="normalText(block)" class="block-text">{{ normalText(block) }}</p>
+              <div v-if="signatureLines(block).length" class="signature-block">
+                <div
+                  v-for="(line, lineIndex) in signatureLines(block)"
+                  :key="lineIndex"
+                  :class="signatureLineClass(line)"
+                >
+                  {{ line }}
+                </div>
+              </div>
               
               <div v-if="hasStructuredTable(block)" class="table-scroll">
                 <table class="plain-table">
