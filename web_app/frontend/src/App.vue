@@ -124,10 +124,23 @@ function renderLines(block: DocumentBlock) {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => ({
+    .flatMap((line) => splitInlineSubheading(line))
+}
+
+function splitInlineSubheading(line: string) {
+  const match = line.match(/^(\d+\.\d+\s*[^：:]{1,36}[：:])\s*(.+)$/)
+  if (match) {
+    return [
+      { text: match[1], type: 'subheading' },
+      { text: match[2], type: 'paragraph' }
+    ]
+  }
+  return [
+    {
       text: line,
       type: /^(\d+\.\d+|[一二三四五六七八九十]+[、．.])/.test(line) ? 'subheading' : 'paragraph'
-    }))
+    }
+  ]
 }
 
 onMounted(() => {

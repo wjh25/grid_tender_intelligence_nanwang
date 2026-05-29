@@ -261,14 +261,14 @@ body {
 }
 
 .block-text p {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
 }
 
 .inline-subheading {
   color: #2c3e50;
   font-size: 15px;
   font-weight: 600;
-  margin: 12px 0 6px;
+  margin: 14px 0 4px;
   text-align: left;
 }
 
